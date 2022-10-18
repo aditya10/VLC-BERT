@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
+from easydict import EasyDict as edict
 from external.pytorch_pretrained_bert.modeling import BertLayerNorm, BertEncoder, BertPooler, ACT2FN, BertOnlyMLMHead
+from common.commonsense_fusion import SimpleFusionLayer
 
 # todo: add this to config
 NUM_SPECIAL_WORDS = 1000
@@ -42,6 +44,12 @@ class VisualLinguisticBert(BaseModel):
         self.embedding_LayerNorm = BertLayerNorm(config.hidden_size, eps=1e-12)
         self.embedding_dropout = nn.Dropout(config.hidden_dropout_prob)
 
+        if config.commonsense_emb_type == 'linear':
+            self.commonsense_linear = nn.Linear(config.hidden_size, config.hidden_size)
+        elif config.commonsense_emb_type == 'fusion':
+            commonsense_conf= edict({'num_heads': 3, 'hidden_size': 768, 'reduce_attention_output': False, 'attend_ques': True})
+            self.commonsense_fusion = SimpleFusionLayer(commonsense_conf)
+        
         # for compatibility of roberta
         self.position_padding_idx = config.position_padding_idx
 
@@ -83,15 +91,35 @@ class VisualLinguisticBert(BaseModel):
             self.special_word_embeddings = nn.Embedding(NUM_SPECIAL_WORDS, config.hidden_size)
             self.special_word_embeddings.weight.data.copy_(self.word_embeddings.weight.data[:NUM_SPECIAL_WORDS])
 
-    def word_embeddings_wrapper(self, input_ids):
+    def word_embeddings_wrapper(self, input_ids, commonsense_embeddings):
+
+        word_embeddings = self.word_embeddings(input_ids)
         if self.config.word_embedding_frozen:
-            word_embeddings = self.word_embeddings(input_ids)
             word_embeddings[input_ids < NUM_SPECIAL_WORDS] \
                 = self.special_word_embeddings(input_ids[input_ids < NUM_SPECIAL_WORDS])
-            return word_embeddings
-        else:
-            return self.word_embeddings(input_ids)
 
+        attn_weights = torch.zeros(commonsense_embeddings.size(0), 1, dtype=torch.float, device=commonsense_embeddings.device)
+
+        if commonsense_embeddings is not None and len(commonsense_embeddings.shape) > 2:
+
+            if self.config.commonsense_emb_type == 'linear':
+                commonsense_emb = self.commonsense_linear(commonsense_embeddings)
+            elif self.config.commonsense_emb_type == 'fusion':
+                commonsense_emb, attn_weights = self.commonsense_fusion(commonsense_embeddings)
+            else:
+                commonsense_emb = commonsense_embeddings
+
+            # Replace word embeddings for [MASK] with loaded commonsense embeddings
+            for i in range(commonsense_emb.shape[0]):
+                sep_idxs = (input_ids[i] == 102).nonzero(as_tuple=True)[0]
+                end_idx = sep_idxs[2] if len(sep_idxs) > 3 else sep_idxs[1]
+                start_idx = end_idx - commonsense_emb.shape[1]
+                for idx in range(start_idx, end_idx):
+                    word_embeddings[i, idx] = commonsense_emb[i, idx-start_idx]
+
+        return word_embeddings, attn_weights
+
+            
     def forward(self,
                 text_input_ids,
                 text_token_type_ids,
@@ -99,18 +127,21 @@ class VisualLinguisticBert(BaseModel):
                 text_mask,
                 object_vl_embeddings,
                 object_mask,
+                commonsense_embeddings=None, # [batch_size, 768]
                 output_all_encoded_layers=True,
                 output_text_and_object_separately=False,
-                output_attention_probs=False):
+                output_attention_probs=False,
+                output_commonsense_attn_weights=False):
 
         # get seamless concatenate embeddings and mask
-        embedding_output, attention_mask, text_mask_new, object_mask_new = self.embedding(text_input_ids,
+        embedding_output, attention_mask, text_mask_new, object_mask_new, attn_weights = self.embedding(text_input_ids,
                                                                                           text_token_type_ids,
+                                                                                          commonsense_embeddings,
                                                                                           text_visual_embeddings,
                                                                                           text_mask,
                                                                                           object_vl_embeddings,
                                                                                           object_mask)
-
+        
         # We create a 3D attention mask from a 2D tensor mask.
         # Sizes are [batch_size, 1, 1, to_seq_length]
         # So we can broadcast to [batch_size, num_heads, from_seq_length, to_seq_length]
@@ -167,18 +198,22 @@ class VisualLinguisticBert(BaseModel):
         else:
             if output_attention_probs:
                 return encoded_layers, pooled_output, attention_probs
+            elif output_commonsense_attn_weights:
+                return encoded_layers, pooled_output, attn_weights
             else:
                 return encoded_layers, pooled_output
 
     def embedding(self,
                   text_input_ids,
                   text_token_type_ids,
+                  commonsense_embeddings,
                   text_visual_embeddings,
                   text_mask,
                   object_vl_embeddings,
                   object_mask):
 
-        text_linguistic_embedding = self.word_embeddings_wrapper(text_input_ids)
+        text_linguistic_embedding, attn_weights = self.word_embeddings_wrapper(text_input_ids, commonsense_embeddings)
+
         if self.visual_1x1_text is not None:
             text_visual_embeddings = self.visual_1x1_text(text_visual_embeddings)
         if self.config.visual_ln:
@@ -238,7 +273,7 @@ class VisualLinguisticBert(BaseModel):
         embeddings = self.embedding_LayerNorm(embeddings)
         embeddings = self.embedding_dropout(embeddings)
 
-        return embeddings, mask, grid_pos < text_end, (grid_pos >= text_end) & (grid_pos < object_end)
+        return embeddings, mask, grid_pos < text_end, (grid_pos >= text_end) & (grid_pos < object_end), attn_weights
 
     def load_language_pretrained_model(self, language_pretrained_model_path):
         pretrained_state_dict = torch.load(language_pretrained_model_path, map_location=lambda storage, loc: storage)

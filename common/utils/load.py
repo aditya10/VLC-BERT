@@ -54,7 +54,7 @@ def smart_resume(model, optimizer, validation_monitor, config, model_prefix, log
                 break
 
 
-def smart_partial_load_model_state_dict(model, state_dict):
+def smart_partial_load_model_state_dict(model, state_dict, vocab_size=3):
     parsed_state_dict = {}
     non_match_keys = []
     pretrained_keys = []
@@ -64,7 +64,7 @@ def smart_partial_load_model_state_dict(model, state_dict):
                 k = k[len('module.'):]
             else:
                 k = 'module.' + k
-        if k in model.state_dict():
+        if k in model.state_dict() and not k.startswith('module.final_mlp'):
             parsed_state_dict[k] = v
             pretrained_keys.append(k)
         else:
@@ -78,5 +78,19 @@ def smart_partial_load_model_state_dict(model, state_dict):
     print("[Partial Load] non pretrain keys: {}".format(non_pretrain_keys))
     new_state_dict = model.state_dict()
     new_state_dict.update(parsed_state_dict)
+
+    token_type_embeddings_weight = new_state_dict['module.vlbert.token_type_embeddings.weight']
+    if vocab_size != token_type_embeddings_weight.size(0):
+        print("[Load Info] Expaded token type vocab size, extending embeddings")
+        token_type_embeddings_weight_new = torch.zeros(vocab_size, token_type_embeddings_weight.size(1))
+        for i in range(vocab_size):
+            if i < token_type_embeddings_weight.size(0):
+                token_type_embeddings_weight_new[i] = token_type_embeddings_weight[i]
+            else:
+                # for all new vocab items, initialize as if it is _text_ type token
+                token_type_embeddings_weight_new[i] = token_type_embeddings_weight[0]
+
+        new_state_dict['module.vlbert.token_type_embeddings.weight'] = token_type_embeddings_weight_new
+        
     model.load_state_dict(new_state_dict)
 

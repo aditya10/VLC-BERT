@@ -11,8 +11,8 @@ import torch.nn.functional as F
 from common.utils.load import smart_load_model_state_dict
 from common.trainer import to_cuda
 from common.utils.create_logger import create_logger
-from vqa.data.build import make_dataloader
-from vqa.modules import *
+from okvqa.data.build import make_dataloader
+from okvqa.modules import *
 
 
 @torch.no_grad()
@@ -31,16 +31,16 @@ def test_net(args, config, ckpt_path=None, save_path=None, save_name=None):
         _, train_output_path = create_logger(config.OUTPUT_PATH, args.cfg, config.DATASET.TRAIN_IMAGE_SET,
                                              split='train')
         model_prefix = os.path.join(train_output_path, config.MODEL_PREFIX)
-        ckpt_path = '{}-best.model'.format(model_prefix)
-        print('Use best checkpoint {}...'.format(ckpt_path))
+        ckpt_path = '{}-latest.model'.format(model_prefix)
+        print('Use latest checkpoint {}...'.format(ckpt_path))
     if save_path is None:
         logger, test_output_path = create_logger(config.OUTPUT_PATH, args.cfg, config.DATASET.TEST_IMAGE_SET,
                                                  split='test')
         save_path = test_output_path
     if not os.path.exists(save_path):
         os.makedirs(save_path)
-    shutil.copy2(ckpt_path,
-                 os.path.join(save_path, '{}_test_ckpt_{}.model'.format(config.MODEL_PREFIX, config.DATASET.TASK)))
+    # shutil.copy2(ckpt_path,
+    #              os.path.join(save_path, '{}_test_ckpt_{}.model'.format(config.MODEL_PREFIX, config.DATASET.TASK)))
 
     # get network
     model = eval(config.MODULE)(config)
@@ -60,6 +60,7 @@ def test_net(args, config, ckpt_path=None, save_path=None, save_name=None):
     # test
     q_ids = []
     answer_ids = []
+    attn_weights = []
     model.eval()
     cur_id = 0
     for nbatch, batch in zip(trange(len(test_loader)), test_loader):
@@ -69,14 +70,15 @@ def test_net(args, config, ckpt_path=None, save_path=None, save_name=None):
         batch = to_cuda(batch)
         output = model(*batch)
         answer_ids.extend(output['label_logits'].argmax(dim=1).detach().cpu().tolist())
+        attn_weights.extend(output['attn_weights'].detach().cpu().tolist())
         cur_id += bs
 
-    result = [{'question_id': q_id, 'answer': test_dataset.answer_vocab[a_id]} for q_id, a_id in zip(q_ids, answer_ids)]
+    result = [{'question_id': q_id, 'answer': test_dataset.answer_vocab[a_id], 'attn_weights': attn} for q_id, a_id, attn in zip(q_ids, answer_ids, attn_weights)]
 
     cfg_name = os.path.splitext(os.path.basename(args.cfg))[0]
-    result_json_path = os.path.join(save_path, '{}_vqa2_{}.json'.format(cfg_name if save_name is None else save_name,
+    result_json_path = os.path.join(save_path, '{}_okvqa_{}.json'.format(cfg_name if save_name is None else save_name,
                                                                         config.DATASET.TEST_IMAGE_SET))
     with open(result_json_path, 'w') as f:
         json.dump(result, f)
     print('result json saved to {}.'.format(result_json_path))
-    return result_json_path
+    return result_json_path, save_path

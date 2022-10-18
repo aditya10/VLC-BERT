@@ -1,2 +1,2 @@
-from .vqa import VQA
+from .aokvqa import AOKVQA
 

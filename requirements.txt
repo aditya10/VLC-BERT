@@ -20,3 +20,4 @@ tqdm
 urllib3
 boto3
 sentence-transformers
+pickle5

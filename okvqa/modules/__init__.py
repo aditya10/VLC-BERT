@@ -1,3 +1,3 @@
-from .resnet_vlbert_for_vqa import ResNetVLBERT
+from .resnet_vlbert_for_okvqa import ResNetVLBERT
 
 

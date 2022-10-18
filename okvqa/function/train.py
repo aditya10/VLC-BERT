@@ -22,9 +22,9 @@ from common.callbacks.epoch_end_callbacks.validation_monitor import ValidationMo
 from common.callbacks.epoch_end_callbacks.checkpoint import Checkpoint
 from common.lr_scheduler import WarmupMultiStepLR
 from common.nlp.bert.optimization import AdamW, WarmupLinearSchedule
-from vqa.data.build import make_dataloader, build_dataset, build_transforms
-from vqa.modules import *
-from vqa.function.val import do_validation
+from okvqa.data.build import make_dataloader, build_dataset, build_transforms
+from okvqa.modules import *
+from okvqa.function.val import do_validation
 
 try:
     from apex import amp
@@ -211,7 +211,7 @@ def train_net(args, config):
                 if no_match:
                     pretrain_state_dict_parsed[k] = v
             pretrain_state_dict = pretrain_state_dict_parsed
-        smart_partial_load_model_state_dict(model, pretrain_state_dict)
+        smart_partial_load_model_state_dict(model, pretrain_state_dict, vocab_size=config.NETWORK.VLBERT.type_vocab_size)
 
     # pretrained classifier
     if config.NETWORK.CLASSIFIER_PRETRAINED:

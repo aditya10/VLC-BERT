@@ -6,7 +6,7 @@ from .transforms.build import build_transforms
 from .collate_batch import BatchCollator
 import pprint
 
-DATASET_CATALOGS = {'vqa': VQA}
+DATASET_CATALOGS = {'aokvqa': AOKVQA}
 
 
 def build_dataset(dataset_name, *args, **kwargs):
@@ -82,7 +82,12 @@ def make_dataloader(cfg, dataset=None, mode='train', distributed=False, num_repl
                                 add_image_as_a_box=cfg.DATASET.ADD_IMAGE_AS_A_BOX,
                                 aspect_grouping=aspect_grouping,
                                 mask_size=(cfg.DATASET.MASK_SIZE, cfg.DATASET.MASK_SIZE),
-                                pretrained_model_name=cfg.NETWORK.BERT_MODEL_NAME)
+                                pretrained_model_name=cfg.NETWORK.BERT_MODEL_NAME,
+                                use_sbert = cfg.DATASET.USE_SBERT,
+                                commonsense_exp_name = cfg.DATASET.COMMONSENSE_EXP_NAME,
+                                max_commonsense_len = cfg.DATASET.MAX_COMMONSENSE_LEN,
+                                commonsense_emb_type = cfg.NETWORK.VLBERT.commonsense_emb_type,
+                                learn_attn= cfg.NETWORK.WEAK_ATTN_LOSS)
 
     sampler = make_data_sampler(dataset, shuffle, distributed, num_replicas, rank)
     batch_sampler = make_batch_data_sampler(dataset, sampler, aspect_grouping, batch_size)

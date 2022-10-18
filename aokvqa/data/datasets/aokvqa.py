@@ -8,8 +8,8 @@ import numpy as np
 import csv
 import sys
 import time
-import pprint
 import logging
+import pickle5 as pickle
 
 import torch
 from torch.utils.data import Dataset
@@ -24,14 +24,15 @@ csv.field_size_limit(sys.maxsize)
 FIELDNAMES = ['image_id', 'image_w', 'image_h', 'num_boxes', 'boxes', 'features']
 
 
-class VQA(Dataset):
+class AOKVQA(Dataset):
     def __init__(self, image_set, root_path, data_path, answer_vocab_file, use_imdb=True,
                  with_precomputed_visual_feat=False, boxes="36",
                  transform=None, test_mode=False,
                  zip_mode=False, cache_mode=False, cache_db=True, ignore_db_cache=True,
                  tokenizer=None, pretrained_model_name=None,
                  add_image_as_a_box=False, mask_size=(14, 14),
-                 aspect_grouping=False, **kwargs):
+                 aspect_grouping=False, use_sbert=False, commonsense_exp_name='', max_commonsense_len=5, 
+                 commonsense_emb_type='', learn_attn=False, **kwargs):
         """
         Visual Question Answering Dataset
 
@@ -49,69 +50,50 @@ class VQA(Dataset):
         :param aspect_grouping: whether to group images via their aspect
         :param kwargs:
         """
-        super(VQA, self).__init__()
+        super(AOKVQA, self).__init__()
 
         assert not cache_mode, 'currently not support cache mode!'
 
-        categories = ['__background__', 'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck',
-                      'boat',
-                      'trafficlight', 'firehydrant', 'stopsign', 'parkingmeter', 'bench', 'bird', 'cat', 'dog', 'horse',
-                      'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella', 'handbag', 'tie',
-                      'suitcase', 'frisbee', 'skis', 'snowboard', 'sportsball', 'kite', 'baseballbat', 'baseballglove',
-                      'skateboard', 'surfboard', 'tennisracket', 'bottle', 'wineglass', 'cup', 'fork', 'knife', 'spoon',
-                      'bowl', 'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot', 'hotdog', 'pizza', 'donut',
-                      'cake', 'chair', 'couch', 'pottedplant', 'bed', 'diningtable', 'toilet', 'tv', 'laptop', 'mouse',
-                      'remote', 'keyboard', 'cellphone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book',
-                      'clock', 'vase', 'scissors', 'teddybear', 'hairdrier', 'toothbrush']
-        vqa_question = {
-            "train2014": "vqa/v2_OpenEnded_mscoco_train2014_questions.json",
-            "valminusminival2014": "vqa/v2_OpenEnded_mscoco_valminusminival2014_questions.json",
-            "val2014": "vqa/v2_OpenEnded_mscoco_val2014_questions.json",
-            "minival2014": "vqa/v2_OpenEnded_mscoco_minival2014_questions.json",
-            "test-dev2015": "vqa/v2_OpenEnded_mscoco_test-dev2015_questions.json",
-            "test2015": "vqa/v2_OpenEnded_mscoco_test2015_questions.json",
-        }
-        vqa_annot = {
-            "train2014": "vqa/v2_mscoco_train2014_annotations.json",
-            "valminusminival2014": "vqa/v2_mscoco_valminusminival2014_annotations.json",
-            "val2014": "vqa/v2_mscoco_val2014_annotations.json",
-            "minival2014": "vqa/v2_mscoco_minival2014_annotations.json",
-        }
-        vqa_imdb = {
-            "train2014": "vqa/vqa_imdb/imdb_train2014.npy",
-            "val2014": "vqa/vqa_imdb/imdb_val2014.npy",
-            'test2015': "vqa/vqa_imdb/imdb_test2015.npy",
-            'minival2014': "vqa/vqa_imdb/imdb_minival2014.npy",
+        aokvqa_question = {
+            "train2017": "aokvqa/aokvqa_v1p0_train.json",
+            "val2017": "aokvqa/aokvqa_v1p0_val.json",
+            "test2017": "aokvqa/aokvqa_v1p0_test.json",
         }
 
         if boxes == "36":
             precomputed_boxes = {
-                'train2014': ("vgbua_res101_precomputed", "trainval_resnet101_faster_rcnn_genome_36"),
-                "valminusminival2014": ("vgbua_res101_precomputed", "trainval_resnet101_faster_rcnn_genome_36"),
-                'val2014': ("vgbua_res101_precomputed", "trainval_resnet101_faster_rcnn_genome_36"),
-                "minival2014": ("vgbua_res101_precomputed", "trainval_resnet101_faster_rcnn_genome_36"),
-                "test-dev2015": ("vgbua_res101_precomputed", "test2015_resnet101_faster_rcnn_genome_36"),
-                "test2015": ("vgbua_res101_precomputed", "test2015_resnet101_faster_rcnn_genome_36"),
+                'train2017': ("vgbua_res101_precomputed", "trainval_resnet101_faster_rcnn_genome_36"),
+                'val2017': ("vgbua_res101_precomputed", "trainval_resnet101_faster_rcnn_genome_36"),
+                'test2017': ("vgbua_res101_precomputed", "test2015_resnet101_faster_rcnn_genome_36"),
             }
         elif boxes == "10-100ada":
             precomputed_boxes = {
-                'train2014': ("vgbua_res101_precomputed", "trainval2014_resnet101_faster_rcnn_genome"),
-                "valminusminival2014": ("vgbua_res101_precomputed", "trainval2014_resnet101_faster_rcnn_genome"),
-                'val2014': ("vgbua_res101_precomputed", "trainval2014_resnet101_faster_rcnn_genome"),
-                "minival2014": ("vgbua_res101_precomputed", "trainval2014_resnet101_faster_rcnn_genome"),
-                "test-dev2015": ("vgbua_res101_precomputed", "test2015_resnet101_faster_rcnn_genome"),
-                "test2015": ("vgbua_res101_precomputed", "test2015_resnet101_faster_rcnn_genome"),
+                'train2017': ("vgbua_res101_precomputed", "trainval2014_resnet101_faster_rcnn_genome"),
+                'val2017': ("vgbua_res101_precomputed", "trainval2014_resnet101_faster_rcnn_genome"),
+                'test2017': ("vgbua_res101_precomputed", "test2015_resnet101_faster_rcnn_genome"),
             }
         else:
             raise ValueError("Not support boxes: {}!".format(boxes))
+        
         coco_dataset = {
-            "train2014": ("train2014", "annotations/instances_train2014.json"),
-            "valminusminival2014": ("val2014", "annotations/instances_val2014.json"),
-            "val2014": ("val2014", "annotations/instances_val2014.json"),
-            "minival2014": ("val2014", "annotations/instances_val2014.json"),
-            "test-dev2015": ("test2015", "annotations/image_info_test2015.json"),
-            "test2015": ("test2015", "annotations/image_info_test2015.json"),
+            "train2017": ("train2017", "annotations/instances_train2017.json"),
+            "val2017": ("val2017", "annotations/instances_val2017.json"),
+            "test2017": ("test2017", "annotations/image_info_test2017.json"),
         }
+
+        commonsense_path = "data/coco/aokvqa/commonsense/"
+        self.experiment_name = commonsense_exp_name
+        self.use_sbert = use_sbert
+        self.max_commonsense_len = max_commonsense_len
+        self.commonsense_emb_type = commonsense_emb_type
+        self.learn_attn = learn_attn
+
+        if self.experiment_name == 'semqo':
+            aokvqa_expansions = {
+                'train2017': commonsense_path+'expansions/semq.o_aokvqa_train.json',
+                'val2017': commonsense_path+'expansions/semq.o_aokvqa_val.json',
+                'test2017': commonsense_path+'expansions/semq.o_aokvqa_test.json',
+            }
 
         self.periodStrip = re.compile("(?!<=\d)(\.)(?!\d)")
         self.commaStrip = re.compile("(\d)(\,)(\d)")
@@ -119,23 +101,22 @@ class VQA(Dataset):
                       '(', ')', '=', '+', '\\', '_', '-',
                       '>', '<', '@', '`', ',', '?', '!']
 
-        self.use_imdb = use_imdb
+        print("Loading OK-VQA dataset: ", image_set)
         self.boxes = boxes
         self.test_mode = test_mode
         self.with_precomputed_visual_feat = with_precomputed_visual_feat
-        self.category_to_idx = {c: i for i, c in enumerate(categories)}
         self.data_path = data_path
         self.root_path = root_path
         with open(answer_vocab_file, 'r', encoding='utf8') as f:
             self.answer_vocab = [w.lower().strip().strip('\r').strip('\n').strip('\r') for w in f.readlines()]
             self.answer_vocab = list(filter(lambda x: x != '', self.answer_vocab))
-            if not self.use_imdb:
-                self.answer_vocab = [self.processPunctuation(w) for w in self.answer_vocab]
+            self.answer_vocab = [self.processPunctuation(w) for w in self.answer_vocab]
         self.image_sets = [iset.strip() for iset in image_set.split('+')]
-        self.ann_files = [os.path.join(data_path, vqa_annot[iset]) for iset in self.image_sets] \
-            if not self.test_mode else [None for iset in self.image_sets]
-        self.q_files = [os.path.join(data_path, vqa_question[iset]) for iset in self.image_sets]
-        self.imdb_files = [os.path.join(data_path, vqa_imdb[iset]) for iset in self.image_sets]
+        self.q_files = [os.path.join(data_path, aokvqa_question[iset]) for iset in self.image_sets]
+        
+        self.expansion_files = [aokvqa_expansions[iset] for iset in self.image_sets] \
+            if (self.experiment_name != '') else [None for iset in self.image_sets]
+
         self.precomputed_box_files = [
             os.path.join(data_path, precomputed_boxes[iset][0],
                          '{0}.zip@/{0}'.format(precomputed_boxes[iset][1])
@@ -144,11 +125,11 @@ class VQA(Dataset):
         self.box_bank = {}
         self.coco_datasets = [(os.path.join(data_path,
                                             coco_dataset[iset][0],
-                                            'COCO_{}_{{:012d}}.jpg'.format(coco_dataset[iset][0]))
+                                            '{{:012d}}.jpg'.format(coco_dataset[iset][0]))
                                if not zip_mode else
                                os.path.join(data_path,
                                             coco_dataset[iset][0] + '.zip@/' + coco_dataset[iset][0],
-                                            'COCO_{}_{{:012d}}.jpg'.format(coco_dataset[iset][0])),
+                                            '{{:012d}}.jpg'.format(coco_dataset[iset][0])),
                                os.path.join(data_path, coco_dataset[iset][1]))
                               for iset in self.image_sets]
         self.transform = transform
@@ -174,12 +155,16 @@ class VQA(Dataset):
         if self.aspect_grouping:
             self.group_ids = self.group_aspect(self.database)
 
+        self.attn_gt = None
+        if self.learn_attn and not self.test_mode:
+            self.attn_gt = self._load_json('data/coco/aokvqa/'+self.experiment_name+'_aokvqa_train_attn_annot_'+str(self.max_commonsense_len)+'.json')
+
     @property
     def data_names(self):
         if self.test_mode:
-            return ['image', 'boxes', 'im_info', 'question']
+            return ['image', 'boxes', 'im_info', 'question', 'expansions', 'c_emb']
         else:
-            return ['image', 'boxes', 'im_info', 'question', 'label']
+            return ['image', 'boxes', 'im_info', 'question', 'expansions', 'c_emb', 'label']
 
     def __getitem__(self, index):
         idb = self.database[index]
@@ -190,13 +175,13 @@ class VQA(Dataset):
             image = None
             w0, h0 = idb['width'], idb['height']
 
-            boxes_features = torch.as_tensor(
+            boxes_features = torch.tensor(
                 np.frombuffer(self.b64_decode(boxes_data['features']), dtype=np.float32).reshape((boxes_data['num_boxes'], -1))
             )
         else:
             image = self._load_image(idb['image_fn'])
             w0, h0 = image.size
-        boxes = torch.as_tensor(
+        boxes = torch.tensor(
             np.frombuffer(self.b64_decode(boxes_data['boxes']), dtype=np.float32).reshape(
                 (boxes_data['num_boxes'], -1))
         )
@@ -226,10 +211,7 @@ class VQA(Dataset):
         boxes[:, [1, 3]] = boxes[:, [1, 3]].clamp(min=0, max=h - 1)
 
         # flip: 'left' -> 'right', 'right' -> 'left'
-        if self.use_imdb:
-            q_tokens = idb['question_tokens']
-        else:
-            q_tokens = self.tokenizer.tokenize(idb['question'])
+        q_tokens = self.tokenizer.tokenize(idb['question'])
         if flipped:
             q_tokens = self.flip_tokens(q_tokens, verbose=False)
         if not self.test_mode:
@@ -241,22 +223,69 @@ class VQA(Dataset):
             label = self.get_soft_target(answers)
 
         # question
-        if self.use_imdb:
-            q_str = ' '.join(q_tokens)
-            q_retokens = self.tokenizer.tokenize(q_str)
-        else:
-            q_retokens = q_tokens
+        q_retokens = q_tokens
         q_ids = self.tokenizer.convert_tokens_to_ids(q_retokens)
+
+        # commonsense
+        exp_ids = []
+        commonsense_embeddings = torch.tensor([0])
+
+        if self.experiment_name != '':
+
+            # If we use SBERT, add [MASK] tokens exp_ids, and load the embeddings in commonsense_embeddings
+            if self.use_sbert:
+                
+                if self.commonsense_emb_type == 'fusion':
+                    commonsense_embeddings = self.get_cached_expansion_emb(idb['image_fn'].split('/')[-1], idb['question_id'], custom_tag='_ques')
+                else:
+                    commonsense_embeddings = self.get_cached_expansion_emb(idb['image_fn'].split('/')[-1], idb['question_id'])
+
+                # Now that we have commonsense embeddings, we add the [MASK] tokens that will be replaced by the commonsense embeddings in training code
+                if self.commonsense_emb_type == 'fusion':
+                    m_tokens = ['[MASK]']
+                else:
+                    m_tokens = ['[MASK]']*self.max_commonsense_len
+                
+                m_ids = self.tokenizer.convert_tokens_to_ids(m_tokens)
+                exp_ids += m_ids
+
+            # If not SBERT, clean the picked expansions and add them to exp_ids
+            else:
+                
+                # We use picked expansions from knowlege selection process
+                picked_exp = idb['picked_exp']
+
+                if isinstance(picked_exp, list):
+                    picked_exp = picked_exp[0]
+                
+                picked_exp = picked_exp.split('.')
+                picked_exp = [sentence.strip() for sentence in picked_exp]
+                picked_exp = [sentence+'.' for sentence in picked_exp if sentence != '']
+
+                if len(picked_exp) >= self.max_commonsense_len:
+                    picked_exp = picked_exp[:self.max_commonsense_len]
+                else:
+                    picked_exp = picked_exp + [''] * (self.max_commonsense_len - len(picked_exp))
+
+                picked_exp = ' '.join(picked_exp)
+                picked_exp_tokens = self.tokenizer.tokenize(picked_exp)
+                exp_ids += self.tokenizer.convert_tokens_to_ids(picked_exp_tokens)
 
         # concat box feature to box
         if self.with_precomputed_visual_feat:
             boxes = torch.cat((boxes, boxes_features), dim=-1)
 
+        if self.attn_gt is not None:
+            if str(idb['image_id']) in self.attn_gt and idb['question_id'] in self.attn_gt[str(idb['image_id'])]:
+                attn_weight_label = torch.tensor(self.attn_gt[str(idb['image_id'])][idb['question_id']])
+            else:
+                attn_weight_label = torch.zeros(self.max_commonsense_len+1)
+            label = torch.cat((label, attn_weight_label), dim=0)
+
         if self.test_mode:
-            return image, boxes, im_info, q_ids
+            return image, boxes, im_info, q_ids, exp_ids, commonsense_embeddings
         else:
-            # print([(self.answer_vocab[i], p.item()) for i, p in enumerate(label) if p.item() != 0])
-            return image, boxes, im_info, q_ids, label
+            return image, boxes, im_info, q_ids, exp_ids, commonsense_embeddings, label 
 
     @staticmethod
     def flip_tokens(tokens, verbose=True):
@@ -324,16 +353,15 @@ class VQA(Dataset):
     def load_annotations(self):
         tic = time.time()
         database = []
-        if self.use_imdb:
-            db_cache_name = 'vqa2_imdb_boxes{}_{}'.format(self.boxes, '+'.join(self.image_sets))
-        else:
-            db_cache_name = 'vqa2_nonimdb_boxes{}_{}'.format(self.boxes, '+'.join(self.image_sets))
+        db_cache_name = 'aokvqa_boxes{}_{}'.format(self.boxes, '+'.join(self.image_sets))
         if self.with_precomputed_visual_feat:
             db_cache_name += 'visualprecomp'
         if self.zip_mode:
             db_cache_name = db_cache_name + '_zipmode'
         if self.test_mode:
             db_cache_name = db_cache_name + '_testmode'
+        if self.experiment_name != '':
+            db_cache_name = db_cache_name + '_' + self.experiment_name
         db_cache_root = os.path.join(self.root_path, 'cache')
         db_cache_path = os.path.join(db_cache_root, '{}.pkl'.format(db_cache_name))
 
@@ -354,46 +382,26 @@ class VQA(Dataset):
         print('loading database of split {}...'.format('+'.join(self.image_sets)))
         tic = time.time()
 
-        if self.use_imdb:
-            for imdb_file, (coco_path, coco_annot), box_file \
-                    in zip(self.imdb_files, self.coco_datasets, self.precomputed_box_files):
-                print("loading imdb: {}".format(imdb_file))
-                imdb = np.load(imdb_file, allow_pickle=True)
-                print("imdb info:")
-                pprint.pprint(imdb[0])
-
-                coco = COCO(coco_annot)
-                for item in imdb[1:]:
-                    idb = {'image_id': item['image_id'],
-                           'image_fn': coco_path.format(item['image_id']),
-                           'width': coco.imgs[item['image_id']]['width'],
-                           'height': coco.imgs[item['image_id']]['height'],
-                           'box_fn': os.path.join(box_file, '{}.json'.format(item['image_id'])),
-                           'question_id': item['question_id'],
-                           'question_tokens': item['question_tokens'],
-                           'answers': item['answers'] if not self.test_mode else None,
-                           }
-                    database.append(idb)
-        else:
-            for ann_file, q_file, (coco_path, coco_annot), box_file \
-                    in zip(self.ann_files, self.q_files, self.coco_datasets, self.precomputed_box_files):
-                qs = self._load_json(q_file)['questions']
-                anns = self._load_json(ann_file)['annotations'] if not self.test_mode else ([None] * len(qs))
-                coco = COCO(coco_annot)
-                for ann, q in zip(anns, qs):
-                    idb = {'image_id': q['image_id'],
-                           'image_fn': coco_path.format(q['image_id']),
-                           'width': coco.imgs[q['image_id']]['width'],
-                           'height': coco.imgs[q['image_id']]['height'],
-                           'box_fn': os.path.join(box_file, '{}.json'.format(q['image_id'])),
-                           'question_id': q['question_id'],
-                           'question': q['question'],
-                           'answers': [a['answer'] for a in ann['answers']] if not self.test_mode else None,
-                           'multiple_choice_answer': ann['multiple_choice_answer'] if not self.test_mode else None,
-                           "question_type": ann['question_type'] if not self.test_mode else None,
-                           "answer_type": ann['answer_type'] if not self.test_mode else None,
-                           }
-                    database.append(idb)
+        for q_file, expansion_file, (coco_path, coco_annot), box_file \
+                in zip(self.q_files, self.expansion_files, self.coco_datasets, self.precomputed_box_files):
+            qs = self._load_json(q_file)
+            expansion_data = self._load_json(expansion_file)
+            coco = COCO(coco_annot)
+            for q in qs:
+                idb = {'image_id': q['image_id'],
+                        'image_fn': coco_path.format(q['image_id']),
+                        'width': coco.imgs[q['image_id']]['width'],
+                        'height': coco.imgs[q['image_id']]['height'],
+                        'box_fn': os.path.join(box_file, '{}.json'.format(q['image_id'])),
+                        'question_id': q['question_id'],
+                        'question': q['question'],
+                        "picked_exp": expansion_data[str(coco_path.format(q['image_id']).split('/')[-1])][str(q['question_id'])] if (self.experiment_name != '') else None,
+                        "rationales": q['rationales'] if self.experiment_name == 'rationales' else None,
+                        'answers': q['direct_answers'] if not self.test_mode else None,
+                        "question_type": "other" if not self.test_mode else None,
+                        "answer_type": "other" if not self.test_mode else None,
+                        }
+                database.append(idb)
 
         print('Done (t={:.2f}s)'.format(time.time() - tic))
 
@@ -448,6 +456,26 @@ class VQA(Dataset):
             self.box_bank[box_file] = in_data
             return in_data
 
+    def get_cached_expansion_emb(self, image_id, question_id, custom_tag=''):
+
+        commonsense_embeddings = None
+
+        for subset in self.image_sets:
+            savepath = 'data/coco/sbert/aokvqa/'+self.experiment_name+'/'+str(self.max_commonsense_len)+custom_tag+'/'+subset
+            
+            image_id = str(image_id)
+            question_id = str(question_id)
+
+            if not os.path.exists(savepath+'/'+image_id+'.pkl'):
+                continue
+                
+            with open(savepath+'/'+image_id+'.pkl', 'rb') as handle:
+                unserialized_data = pickle.load(handle)
+                commonsense_embeddings = torch.tensor(unserialized_data[question_id])
+
+        assert commonsense_embeddings is not None, 'No expansion embedding found at {}'.format(savepath+'/'+image_id+'.pkl')
+        return commonsense_embeddings
+
     def __len__(self):
         return len(self.database)
 
@@ -458,10 +486,11 @@ class VQA(Dataset):
             return Image.open(path).convert('RGB')
 
     def _load_json(self, path):
-        if '.zip@' in path:
+        if path == None:
+            return None
+        elif '.zip@' in path:
             f = self.zipreader.read(path)
             return json.loads(f.decode())
         else:
             with open(path, 'r') as f:
                 return json.load(f)
-

@@ -20,6 +20,7 @@ class BatchCollator(object):
             image_none = True
         max_boxes = max([data[self.data_names.index('boxes')].shape[0] for data in batch])
         max_question_length = max([len(data[self.data_names.index('question')]) for data in batch])
+        max_expansions_length = max([len(data[self.data_names.index('expansions')]) for data in batch])
 
         for i, ibatch in enumerate(batch):
             out = {}
@@ -35,6 +36,9 @@ class BatchCollator(object):
 
             question = ibatch[self.data_names.index('question')]
             out['question'] = clip_pad_1d(question, max_question_length, pad=0)
+
+            expansions = ibatch[self.data_names.index('expansions')]
+            out['expansions'] = clip_pad_1d(expansions, max_expansions_length, pad=0)
 
             other_names = [data_name for data_name in self.data_names if data_name not in out]
             for name in other_names:

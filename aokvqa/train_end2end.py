@@ -4,9 +4,10 @@ import argparse
 import torch
 import subprocess
 
-from vqa.function.config import config, update_config
-from vqa.function.train import train_net
-from vqa.function.test import test_net
+from aokvqa.function.config import config, update_config
+from aokvqa.function.train import train_net
+from aokvqa.function.test import test_net
+from external.PythonEvaluationTools.aokvqa_vqaEval import run_eval
 
 
 def parse_args():
@@ -17,7 +18,7 @@ def parse_args():
     parser.add_argument('--dist', help='whether to use distributed training', default=False, action='store_true')
     parser.add_argument('--slurm', help='whether this is a slurm job', default=False, action='store_true')
     parser.add_argument('--do-test', help='whether to generate csv result on test set',
-                        default=False, action='store_true')
+                        default=True, action='store_true')
     parser.add_argument('--cudnn-off', help='disable cudnn', default=False, action='store_true')
 
     # easy test pretrain model
@@ -53,7 +54,8 @@ def main():
     args, config = parse_args()
     rank, model = train_net(args, config)
     if args.do_test and (rank is None or rank == 0):
-        test_net(args, config)
+        res_path, save_path = test_net(args, config)
+        run_eval(res_path, split='val')
 
 
 if __name__ == '__main__':

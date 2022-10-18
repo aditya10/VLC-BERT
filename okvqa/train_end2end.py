@@ -3,10 +3,12 @@ import os
 import argparse
 import torch
 import subprocess
+import json
 
-from vqa.function.config import config, update_config
-from vqa.function.train import train_net
-from vqa.function.test import test_net
+from okvqa.function.config import config, update_config
+from okvqa.function.train import train_net
+from okvqa.function.test import test_net
+from external.PythonEvaluationTools.okvqa_vqaEval import run_eval
 
 
 def parse_args():
@@ -17,7 +19,7 @@ def parse_args():
     parser.add_argument('--dist', help='whether to use distributed training', default=False, action='store_true')
     parser.add_argument('--slurm', help='whether this is a slurm job', default=False, action='store_true')
     parser.add_argument('--do-test', help='whether to generate csv result on test set',
-                        default=False, action='store_true')
+                        default=True, action='store_true')
     parser.add_argument('--cudnn-off', help='disable cudnn', default=False, action='store_true')
 
     # easy test pretrain model
@@ -48,13 +50,37 @@ def parse_args():
 
     return args, config
 
+def _load_json(path):
+    with open(path, 'r') as f:
+        return json.load(f)
+
+def prune_res_file(res_file):
+    res = _load_json(res_file)
+    annot = _load_json('data/coco/okvqa/OpenEnded_mscoco_val2014_questions_pruned.json')
+
+    res_pruned = []
+    for a in annot['questions']:
+        qid = a['question_id']
+
+        for r in res:
+            if r['question_id'] == qid:
+                res_pruned.append(r)
+                break
+    
+    res_pruned_path = res_file[:-5]+'_pruned.json'
+    with open(res_pruned_path, 'w') as f:
+        json.dump(res_pruned, f)
+    
+    return res_pruned_path
 
 def main():
     args, config = parse_args()
     rank, model = train_net(args, config)
     if args.do_test and (rank is None or rank == 0):
-        test_net(args, config)
-
+        res_path, save_path = test_net(args, config)
+        run_eval(res_path, save_path, pruned=False)
+        res_pruned_path = prune_res_file(res_path)
+        run_eval(res_pruned_path, save_path, pruned=True)
 
 if __name__ == '__main__':
     main()

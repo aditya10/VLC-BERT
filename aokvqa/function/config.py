@@ -47,6 +47,9 @@ _C.DATASET.QA2R_NOQ = False
 _C.DATASET.QA2R_AUG = False
 _C.DATASET.BOXES = "36"   # "36" or "10-100ada"
 _C.DATASET.USE_IMDB = True
+_C.DATASET.USE_SBERT = False
+_C.DATASET.COMMONSENSE_EXP_NAME = ''
+_C.DATASET.MAX_COMMONSENSE_LEN = 5
 
 # ------------------------------------------------------------------------------------- #
 # Common network options
@@ -85,6 +88,7 @@ _C.NETWORK.CNN_LOSS_WEIGHT = 1.0
 _C.NETWORK.ANS_LOSS_WEIGHT = 1.0
 _C.NETWORK.ANS_LOSS_TYPE = 'bce' # 'bce' or 'ce'
 _C.NETWORK.REPLACE_OBJECT_CHANGE_LABEL = True
+_C.NETWORK.WEAK_ATTN_LOSS = False
 
 _C.NETWORK.VLBERT = edict()
 # _C.NETWORK.VLBERT.vocab_size = None
@@ -112,6 +116,7 @@ _C.NETWORK.VLBERT.visual_ln = False
 _C.NETWORK.VLBERT.object_word_embed_mode = 2
 _C.NETWORK.VLBERT.with_pooler = False
 _C.NETWORK.VLBERT.position_padding_idx = -1
+_C.NETWORK.VLBERT.commonsense_emb_type = ''
 
 _C.NETWORK.CLASSIFIER_TYPE = "2fc"    # 2fc or 1fc or mlm
 _C.NETWORK.CLASSIFIER_PRETRAINED = False
@@ -173,7 +178,7 @@ _C.TEST.BATCH_IMAGES = 1
 
 def update_config(config_file):
     with open(config_file) as f:
-        exp_config = edict(yaml.load(f))
+        exp_config = edict(yaml.safe_load(f))
         for k, v in exp_config.items():
             if k in config:
                 if isinstance(v, dict):

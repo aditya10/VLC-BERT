@@ -1,42 +1,45 @@
 ---
-RNG_SEED: 12345
-OUTPUT_PATH: './output/pretrain/vl-bert'
-MODULE: ResNetVLBERTForPretrainingMultitask
+RNG_SEED: 1008
+OUTPUT_PATH: './output/vlc-bert/okvqa/base'
+MODULE: ResNetVLBERT
 GPUS: '0,1,2,3'
 LOG_FREQUENT: 100
 VAL_FREQUENT: 1
-CHECKPOINT_FREQUENT: 1
-MODEL_PREFIX: 'vl-bert_base_res101_pretrain_multitask'
+CHECKPOINT_FREQUENT: 20
+MODEL_PREFIX: 'vl-bert_base_res101_okvqa'
 NUM_WORKERS_PER_GPU: 4
 SCALES:
 - 600
 - 1000
 
 DATASET:
-
-- DATASET: conceptual_captions
+  DATASET: okvqa
+  ANSWER_VOCAB_FILE: './data/coco/okvqa/answers_okvqa.txt'
+  LABEL_INDEX_IN_BATCH: -1
   APPEND_INDEX: false
-  DATASET_PATH: './data/conceptual-captions'
+  DATASET_PATH: './data/coco'
   ROOT_PATH: './'
-  TRAIN_IMAGE_SET: 'train'
-  VAL_IMAGE_SET: 'val'
-  TEST_IMAGE_SET: 'val'
+  TRAIN_IMAGE_SET: 'train2014'
+  VAL_IMAGE_SET: 'trainval2014'
+  TEST_IMAGE_SET: 'val2014'
   ADD_IMAGE_AS_A_BOX: true
   ZIP_MODE: false
   CACHE_MODE: false
-  IGNORE_DB_CACHE: false
+  IGNORE_DB_CACHE: true
   MASK_SIZE: 14
-
-- DATASET: general_corpus
-  TRAIN_ANNOTATION_FILE: './data/en_corpus/bc1g.doc+./data/en_corpus/wiki.doc'
-  VAL_ANNOTATION_FILE: './data/en_corpus/bc1g.doc'
-  TEST_ANNOTATION_FILE: './data/en_corpus/bc1g.doc'
-  SEQ_LEN: 64
-  MIN_SEQ_LEN: 64
+  BOXES: "10-100ada"
+  ANSWER_VOCAB_SIZE: 2249
+  USE_SBERT: true
+  COMMONSENSE_EXP_NAME: 'semqo'
+  MAX_COMMONSENSE_LEN: 5
 
 NETWORK:
-  PARTIAL_PRETRAIN: ""
-  PARTIAL_PRETRAIN_PREFIX_CHANGES: []
+  PARTIAL_PRETRAIN: "./model/pretrained_model/vl-bert_base_vqa-0005.model"
+  PARTIAL_PRETRAIN_PREFIX_CHANGES:
+  - "vlbert.mlm_head.predictions.transform->final_mlp.0"
+  - "module.vlbert.mlm_head.predictions.transform->module.final_mlp.0"
+  - "vlbert->vlbert"
+  - "module.vlbert->module.vlbert"
   IMAGE_NUM_LAYERS: 101
   IMAGE_C5_DILATED: true
   IMAGE_STRIDE_IN_1x1: true
@@ -48,8 +51,8 @@ NETWORK:
   - 1.0
   - 1.0
   - 1.0
-  IMAGE_FEAT_PRECOMPUTED: false
-  IMAGE_PRETRAINED: './model/pretrained_model/resnet101-pt-vgbua'
+  IMAGE_FEAT_PRECOMPUTED: true
+  IMAGE_PRETRAINED: ''
   IMAGE_PRETRAINED_EPOCH: 0
   IMAGE_FROZEN_BACKBONE_STAGES:
   - 1
@@ -63,14 +66,9 @@ NETWORK:
   BERT_PRETRAINED_EPOCH: 0
   BERT_FROZEN: false
   ENABLE_CNN_REG_LOSS: false
-  MLM_LOSS_NORM_IN_BATCH_FIRST: false
-  MVRC_LOSS_NORM_IN_BATCH_FIRST: false
-  WITH_REL_LOSS: false
-  WITH_MLM_LOSS: true
-  WITH_MVRC_LOSS: true
+  WEAK_ATTN_LOSS: true
 
   VLBERT:
-    with_pooler: false
     input_transform_type: 1
     visual_size: 768
     hidden_size: 768
@@ -81,52 +79,47 @@ NETWORK:
     hidden_dropout_prob: 0.1
     attention_probs_dropout_prob: 0.1
     max_position_embeddings: 512
-    type_vocab_size: 3
+    type_vocab_size: 4
     vocab_size: 30522
     initializer_range: 0.02
     visual_scale_text_init: 0.0
     visual_scale_object_init: 0.0
     visual_ln: true
-    pos_embedding_frozen: false
+    commonsense_emb_type: 'fusion'
+
+  CLASSIFIER_TYPE: "mlm"
+  CLASSIFIER_PRETRAINED: true
+  CLASSIFIER_DROPOUT: 0.1
 
 TRAIN:
   SHUFFLE: true
   FLIP_PROB: 0.5
-  BATCH_IMAGES:
-  - 8
-  - 8
+  BATCH_IMAGES: 16
+  GRAD_ACCUMULATE_STEPS: 4
   ASPECT_GROUPING: false
   RESUME: false
   AUTO_RESUME: true
   BEGIN_EPOCH: 0
-  END_EPOCH: 10
+  END_EPOCH: 20
   OPTIMIZER: 'AdamW'
-  CLIP_GRAD_NORM: 10
-  LR: 1.0e-7
+  CLIP_GRAD_NORM: 1.0
+  LR: 6.25e-7
   LR_SCHEDULE: 'triangle'
   WD: 0.0001
   WARMUP: true
   WARMUP_METHOD: 'linear'
   WARMUP_FACTOR: 0.0
-  WARMUP_STEPS: 16000
-  FP16: true
-  FP16_LOSS_SCALE: 'dynamic'
-  LOSS_LOGGERS:
-  - "mlm_loss_wvc,MLMLossWVC"
-  - "mlm_loss_aux,MLMLossAUX"
-  - "mvrc_loss,MVRCLoss"
+  WARMUP_STEPS: 1000
+  FP16: false
+  FP16_LOSS_SCALE: 128.0
 
 VAL:
   SHUFFLE: false
   FLIP_PROB: 0
-  BATCH_IMAGES:
-  - 8
-  - 8
+  BATCH_IMAGES: 64
 
 TEST:
   SHUFFLE: false
   FLIP_PROB: 0
   TEST_EPOCH: 0
-  BATCH_IMAGES:
-  - 8
-  - 8
+  BATCH_IMAGES: 64

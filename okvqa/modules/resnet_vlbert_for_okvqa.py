@@ -32,6 +32,9 @@ class ResNetVLBERT(Module):
                 raise NotImplementedError
         self.image_feature_bn_eval = config.NETWORK.IMAGE_FROZEN_BN
 
+        self.use_expansions = config.DATASET.COMMONSENSE_EXP_NAME != ''
+        self.commonsense_exp_name = config.NETWORK.VLBERT.commonsense_emb_type
+
         self.tokenizer = BertTokenizer.from_pretrained(config.NETWORK.BERT_MODEL_NAME)
 
         language_pretrained_model_path = None
@@ -146,7 +149,7 @@ class ResNetVLBERT(Module):
         q_end = 1 + question_mask.sum(1, keepdim=True)
         a_end = q_end + 1 + answer_mask.sum(1, keepdim=True)
         input_ids = torch.zeros((batch_size, max_len), dtype=question.dtype, device=question.device)
-        input_mask = torch.ones((batch_size, max_len), dtype=torch.uint8, device=question.device)
+        input_mask = torch.ones((batch_size, max_len), dtype=torch.bool, device=question.device)
         input_type_ids = torch.zeros((batch_size, max_len), dtype=question.dtype, device=question.device)
         text_tags = input_type_ids.new_zeros((batch_size, max_len))
         grid_i, grid_j = torch.meshgrid(torch.arange(batch_size, device=question.device),
@@ -166,11 +169,51 @@ class ResNetVLBERT(Module):
 
         return input_ids, input_type_ids, text_tags, input_mask, (a_end - 1).squeeze(1)
 
+    def prepare_text_from_qea(self, question, question_tags, question_mask, expansions, expansions_tags, expansions_mask, answer, answer_tags, answer_mask):
+        batch_size, max_q_len = question.shape
+        _, max_e_len = expansions.shape
+        _, max_a_len = answer.shape
+        max_len = (question_mask.sum(1) + expansions_mask.sum(1) + answer_mask.sum(1)).max() + 4
+        cls_id, sep_id = self.tokenizer.convert_tokens_to_ids(['[CLS]', '[SEP]'])
+        q_end = 1 + question_mask.sum(1, keepdim=True)
+        e_end = q_end + 1 + expansions_mask.sum(1, keepdim=True)
+        a_end = e_end + 1 + answer_mask.sum(1, keepdim=True)
+        # Define a new input sequence
+        input_ids = torch.zeros((batch_size, max_len), dtype=question.dtype, device=question.device)
+        input_mask = torch.ones((batch_size, max_len), dtype=torch.bool, device=question.device)
+        input_type_ids = torch.zeros((batch_size, max_len), dtype=question.dtype, device=question.device)
+        text_tags = input_type_ids.new_zeros((batch_size, max_len))
+        grid_i, grid_j = torch.meshgrid(torch.arange(batch_size, device=question.device),
+                                        torch.arange(max_len, device=question.device))
+
+        input_mask[grid_j > a_end] = 0
+        input_type_ids[(grid_j > q_end) & (grid_j <= e_end)] = 3
+        input_type_ids[(grid_j > e_end) & (grid_j <= a_end)] = 1
+        q_input_mask = (grid_j > 0) & (grid_j < q_end)
+        c_input_mask = (grid_j > q_end) & (grid_j < e_end)
+        a_input_mask = (grid_j > e_end) & (grid_j < a_end)
+        input_ids[:, 0] = cls_id
+        input_ids[grid_j == q_end] = sep_id
+        input_ids[grid_j == e_end] = sep_id
+        input_ids[grid_j == a_end] = sep_id
+        input_ids[q_input_mask] = question[question_mask]
+        input_ids[c_input_mask] = expansions[expansions_mask]
+        input_ids[a_input_mask] = answer[answer_mask]
+        text_tags[q_input_mask] = question_tags[question_mask]
+        text_tags[c_input_mask] = expansions_tags[expansions_mask]
+        text_tags[a_input_mask] = answer_tags[answer_mask]
+
+        #print('Inputs: ', input_ids, input_type_ids, text_tags, input_mask)
+
+        return input_ids, input_type_ids, text_tags, input_mask, (a_end - 1).squeeze(1)
+
     def train_forward(self,
                       image,
                       boxes,
                       im_info,
                       question,
+                      expansions,
+                      commonsense_emb,
                       label,
                       ):
         ###########################################
@@ -193,6 +236,10 @@ class ResNetVLBERT(Module):
         question_tags = question.new_zeros(question_ids.shape)
         question_mask = (question > 0.5)
 
+        expansions_ids = expansions
+        expansions_tags = expansions.new_zeros(expansions_ids.shape)
+        expansions_mask = (expansions > 0.5)
+
         answer_ids = question_ids.new_zeros((question_ids.shape[0], 1)).fill_(
             self.tokenizer.convert_tokens_to_ids(['[MASK]'])[0])
         answer_mask = question_mask.new_zeros(answer_ids.shape).fill_(1)
@@ -201,12 +248,23 @@ class ResNetVLBERT(Module):
         ############################################
 
         # prepare text
-        text_input_ids, text_token_type_ids, text_tags, text_mask, ans_pos = self.prepare_text_from_qa(question_ids,
+        if self.use_expansions:
+            text_input_ids, text_token_type_ids, text_tags, text_mask, ans_pos = self.prepare_text_from_qea(question_ids,
                                                                                                        question_tags,
                                                                                                        question_mask,
+                                                                                                       expansions_ids,
+                                                                                                       expansions_tags,
+                                                                                                       expansions_mask,
                                                                                                        answer_ids,
                                                                                                        answer_tags,
                                                                                                        answer_mask)
+        else:
+            text_input_ids, text_token_type_ids, text_tags, text_mask, ans_pos = self.prepare_text_from_qa(question_ids,
+                                                                                                        question_tags,
+                                                                                                        question_mask,
+                                                                                                        answer_ids,
+                                                                                                        answer_tags,
+                                                                                                        answer_mask)
         if self.config.NETWORK.NO_GROUNDING:
             obj_rep_zeroed = obj_reps['obj_reps'].new_zeros(obj_reps['obj_reps'].shape)
             text_tags.zero_()
@@ -224,13 +282,15 @@ class ResNetVLBERT(Module):
 
         # Visual Linguistic BERT
 
-        hidden_states, hc = self.vlbert(text_input_ids,
+        hidden_states, hc, attn_weights = self.vlbert(text_input_ids,
                                       text_token_type_ids,
                                       text_visual_embeddings,
                                       text_mask,
                                       object_vl_embeddings,
                                       box_mask,
-                                      output_all_encoded_layers=False)
+                                      commonsense_embeddings=commonsense_emb,
+                                      output_all_encoded_layers=False,
+                                      output_commonsense_attn_weights=True)
         _batch_inds = torch.arange(question.shape[0], device=question.device)
 
         hm = hidden_states[_batch_inds, ans_pos]
@@ -246,7 +306,25 @@ class ResNetVLBERT(Module):
         logits = self.final_mlp(hm)
 
         # loss
+        if self.config.NETWORK.WEAK_ATTN_LOSS:
+            max_c_len = 0-(self.config.DATASET.MAX_COMMONSENSE_LEN + 1)
+            attn_label = label[:, max_c_len:]
+            label = label[:, :max_c_len]
+            attn_weights = torch.mean(attn_weights, dim=1)
+            
+        # loss
         ans_loss = F.binary_cross_entropy_with_logits(logits, label) * label.size(1)
+
+        if self.config.NETWORK.WEAK_ATTN_LOSS:
+            loss_mask = attn_label.sum(1) > 0
+            attn_weights = attn_weights[loss_mask, :]
+            attn_label = attn_label[loss_mask, :]
+            if attn_label.sum() > 0:
+                attn_loss = F.binary_cross_entropy_with_logits(attn_weights, attn_label) * attn_label.size(1)
+            else:
+                attn_loss = 0
+
+            ans_loss = ans_loss + attn_loss
 
         outputs.update({'label_logits': logits,
                         'label': label,
@@ -260,7 +338,9 @@ class ResNetVLBERT(Module):
                           image,
                           boxes,
                           im_info,
-                          question):
+                          question,
+                          expansions,
+                          commonsense_emb):
 
         ###########################################
 
@@ -282,6 +362,10 @@ class ResNetVLBERT(Module):
         question_tags = question.new_zeros(question_ids.shape)
         question_mask = (question > 0.5)
 
+        expansions_ids = expansions
+        expansions_tags = expansions.new_zeros(expansions_ids.shape)
+        expansions_mask = (expansions > 0.5)
+
         answer_ids = question_ids.new_zeros((question_ids.shape[0], 1)).fill_(
             self.tokenizer.convert_tokens_to_ids(['[MASK]'])[0])
         answer_mask = question_mask.new_zeros(answer_ids.shape).fill_(1)
@@ -290,12 +374,23 @@ class ResNetVLBERT(Module):
         ############################################
 
         # prepare text
-        text_input_ids, text_token_type_ids, text_tags, text_mask, ans_pos = self.prepare_text_from_qa(question_ids,
+        if self.use_expansions:
+            text_input_ids, text_token_type_ids, text_tags, text_mask, ans_pos = self.prepare_text_from_qea(question_ids,
                                                                                                        question_tags,
                                                                                                        question_mask,
+                                                                                                       expansions_ids,
+                                                                                                       expansions_tags,
+                                                                                                       expansions_mask,
                                                                                                        answer_ids,
                                                                                                        answer_tags,
                                                                                                        answer_mask)
+        else:
+            text_input_ids, text_token_type_ids, text_tags, text_mask, ans_pos = self.prepare_text_from_qa(question_ids,
+                                                                                                        question_tags,
+                                                                                                        question_mask,
+                                                                                                        answer_ids,
+                                                                                                        answer_tags,
+                                                                                                        answer_mask)
         if self.config.NETWORK.NO_GROUNDING:
             obj_rep_zeroed = obj_reps['obj_reps'].new_zeros(obj_reps['obj_reps'].shape)
             text_tags.zero_()
@@ -313,13 +408,15 @@ class ResNetVLBERT(Module):
 
         # Visual Linguistic BERT
 
-        hidden_states, hc = self.vlbert(text_input_ids,
+        hidden_states, hc, attn_weights = self.vlbert(text_input_ids,
                                       text_token_type_ids,
                                       text_visual_embeddings,
                                       text_mask,
                                       object_vl_embeddings,
                                       box_mask,
-                                      output_all_encoded_layers=False)
+                                      commonsense_embeddings=commonsense_emb,
+                                      output_all_encoded_layers=False,
+                                      output_commonsense_attn_weights=True)
         _batch_inds = torch.arange(question.shape[0], device=question.device)
 
         hm = hidden_states[_batch_inds, ans_pos]
@@ -334,6 +431,6 @@ class ResNetVLBERT(Module):
         # logits = self.final_mlp(hc)
         logits = self.final_mlp(hm)
 
-        outputs.update({'label_logits': logits})
+        outputs.update({'label_logits': logits, 'attn_weights': attn_weights})
 
         return outputs

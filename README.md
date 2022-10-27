@@ -9,7 +9,15 @@ VLC-BERT is a vision-language-commonsense transformer model that incoporates con
 ## Citing VLC-BERT
 
 ```
-TODO
+@misc{ravi-vlcbert,
+  title = {VLC-BERT: Visual Question Answering with Contextualized Commonsense Knowledge},
+  author = {Ravi, Sahithya and Chinchure, Aditya and Sigal, Leonid and Liao, Renjie and Shwartz, Vered},
+  doi = {10.48550/ARXIV.2210.13626},
+  url = {https://arxiv.org/abs/2210.13626},
+  publisher = {arXiv},
+  year = {2022}
+}
+
 ```
 
 # Setup

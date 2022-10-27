@@ -2,7 +2,7 @@
 
 VLC-BERT is a vision-language-commonsense transformer model that incoporates contextualized commonsense for external knowledge visual questioning tasks, OK-VQA and A-OKVQA.
 
-*Note*: This repository has code for the VLC-BERT transformer model. To generate commonsense expansions using COMET, please refer to [this project](https://github.com/sahithyaravi1493/vlc_transformer).
+*Note*: This repository has code for the VLC-BERT transformer model. For Knowledge generation and selection (generating the final commonsense inferences that go into VLC-BERT), please refer to [this project](https://github.com/sahithyaravi1493/VLC_Commonsense).
 
 ![](./figs/VLC-BERT-inputs.png)
 

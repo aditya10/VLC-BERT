@@ -43,5 +43,20 @@ mkdir ckpts
 
 Follow [PREPARE_DATA.md](./data/PREPARE_DATA.md) to download relevant data.
 
-Updated links for commonsense components will be available very soon (3-5 days), please stay tuned!
+Download VLC-BERT data from [Google Drive](https://drive.google.com/drive/folders/18NfXfs_VVwgrkkr0thHddQj42bdu52RG?usp=sharing). This folder contains:
+* pre-built commonsense expansions
+* VQA Pre-trained model checkpoint
+* Answer vocabularies for the OK-VQA and A-OKVQA
 
+Please save the files to the appropriate locations.
+
+## Building SBERT annotations:
+
+You must build SBERT annotations for the A-OKVQA and OK-VQA datasets by running this python script: `common/utils/build_sbert_emb.py` (see [here](common/utils/build_sbert_emb.py)). Please change the settings at the top of the script to build annotations for the appropriate dataset.
+
+
+## Building attention annotations:
+
+To build attention annotations for OK-VQA, follow: `common/utils/build_attn_annot_okvqa.py` (see [here](common/utils/build_attn_annot_okvqa.py)).
+
+To build attention annotatiosn for AOKVQA, follow: `common/utils/build_attn_annot_aokvqa.py` (see [here](common/utils/build_attn_annot_aokvqa.py)).

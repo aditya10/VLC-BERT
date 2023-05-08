@@ -52,11 +52,24 @@ Please save the files to the appropriate locations.
 
 ## Building SBERT annotations:
 
+Before you begin, it is recommended that you setup SBERT in a new conda environment.
+
+```bash
+# Conda setup
+conda create -n sbert-env python=3.8
+conda activate sbert-env
+
+# Install sbert, see https://www.sbert.net
+pip install -U sentence-transformers
+```
+
 You must build SBERT annotations for the A-OKVQA and OK-VQA datasets by running this python script: `common/utils/build_sbert_emb.py` (see [here](common/utils/build_sbert_emb.py)). Please change the settings at the top of the script to build annotations for the appropriate dataset.
 
 
 ## Building attention annotations:
 
+We use weak supervision to train the commonsense attention weights. Therefore, we need ground truth attention weight annotations first, which we build using the following scripts.
+
 To build attention annotations for OK-VQA, follow: `common/utils/build_attn_annot_okvqa.py` (see [here](common/utils/build_attn_annot_okvqa.py)).
 
-To build attention annotatiosn for AOKVQA, follow: `common/utils/build_attn_annot_aokvqa.py` (see [here](common/utils/build_attn_annot_aokvqa.py)).
+To build attention annotatiosn for A-OKVQA, follow: `common/utils/build_attn_annot_aokvqa.py` (see [here](common/utils/build_attn_annot_aokvqa.py)).
